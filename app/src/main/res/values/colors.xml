@@ -1,0 +1,4 @@
+<resources>
+    <!-- indigo — distinct from Couple Face Swap (purple) and Face Swap Video (teal) -->
+    <color name="ic_launcher_background">#3F51B5</color>
+</resources>
