@@ -1,9 +1,13 @@
-# GIF Face Swap 1.0
+# GIF Face Swap 1.0.1
 
 Offline Android app that swaps a face from a photo onto every frame of an animated GIF.
 
+### 1.0.1
+
+- **Bugfix:** exported GIFs showed a broken thumbnail in Gallery / Photos / file managers. Root cause: GIF LZW encoder emitted the Clear code at the *reset* code width instead of the *current* width once the dictionary filled, producing invalid GIF89a streams. Also writes a Global Color Table (gallery-friendly) and refuses to publish empty/invalid files into MediaStore.
+
 - **Package:** `com.vanu.giffaceswap`
-- **Version:** 1.0 (versionCode 1)
+- **Version:** 1.0.1 (versionCode 2)
 - **Min SDK:** 24 · **Target SDK:** 35
 - **New standalone app** (separate from Couple Face Swap / Face Swap Video)
 
@@ -11,10 +15,10 @@ Offline Android app that swaps a face from a photo onto every frame of an animat
 
 | APK | Size | SHA-256 |
 |---|---|---|
-| [GifFaceSwap-1.0-arm64.apk](https://github.com/vanukrishnans-source/gif-face-swap/releases/download/v1.0/GifFaceSwap-1.0-arm64.apk) (use this) | 17,135,991 B (~16.3 MB) | `aa47ee61fb4755a96b7ac890eec0400518f0e60022217e9c34a9bb65d0029ad0` |
-| [GifFaceSwap-1.0-armeabi-v7a.apk](https://github.com/vanukrishnans-source/gif-face-swap/releases/download/v1.0/GifFaceSwap-1.0-armeabi-v7a.apk) | 15,589,999 B (~14.9 MB) | `93c6c6af0815852ac1aee7474d33961430d94f3d39d0b9ac607d34dc1f0a1466` |
+| [GifFaceSwap-1.0.1-arm64.apk](https://github.com/vanukrishnans-source/gif-face-swap/releases/download/v1.0.1/GifFaceSwap-1.0.1-arm64.apk) (use this) | 17,137,267 B (~16.3 MB) | `9dbc60e092ab9528898f26d6a7d91a17e6d80f987c7c18c94719f2ab50c5d7bf` |
+| [GifFaceSwap-1.0.1-armeabi-v7a.apk](https://github.com/vanukrishnans-source/gif-face-swap/releases/download/v1.0.1/GifFaceSwap-1.0.1-armeabi-v7a.apk) | 15,591,275 B (~14.9 MB) | `e6d96de504f2015eb83c25283506fa1e8a7b23c2f24d23d9fe6d0e1bf30b3d02` |
 
-arm64 covers current phones (Galaxy S24 Ultra, ROG Phone 3, etc.).
+arm64 covers current phones (Galaxy S24 Ultra, ROG Phone 3, etc.). Previous: [v1.0](https://github.com/vanukrishnans-source/gif-face-swap/releases/tag/v1.0).
 
 ## How to use
 

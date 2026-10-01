@@ -224,6 +224,8 @@ private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third:
 
 object GifFiles {
     fun saveToPictures(context: Context, src: File): String {
+        // Never publish a MediaStore placeholder for a bad/empty encode.
+        GifEncoder.verifyGifFile(src)
         val name = "GifFaceSwap_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".gif"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
@@ -236,19 +238,46 @@ object GifFiles {
             val uri = cr.insert(MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
                 ?: throw IOException("Couldn't create the GIF in the gallery.")
             try {
+                var written = 0L
                 (cr.openOutputStream(uri) ?: throw IOException("Couldn't write the GIF.")).use { o ->
-                    src.inputStream().use { it.copyTo(o, 1 shl 20) }
+                    src.inputStream().use { input ->
+                        val buf = ByteArray(1 shl 20)
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n <= 0) break
+                            o.write(buf, 0, n)
+                            written += n
+                        }
+                        o.flush()
+                    }
+                }
+                if (written < 32 || written != src.length()) {
+                    throw IOException("GIF write incomplete (${written}/${src.length()} bytes).")
                 }
                 values.clear(); values.put(MediaStore.Images.Media.IS_PENDING, 0)
                 cr.update(uri, values, null, null)
             } catch (e: Exception) {
-                cr.delete(uri, null, null); throw e
+                runCatching { cr.delete(uri, null, null) }
+                throw e
             }
         } else {
             @Suppress("DEPRECATION")
             val d = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "GifFaceSwap")
             if (!d.exists() && !d.mkdirs()) throw IOException("Couldn't create Pictures/GifFaceSwap.")
-            val f = File(d, name); src.copyTo(f, overwrite = true)
+            // Write via temp then rename so a crash never leaves a half-written .gif in Pictures.
+            val tmp = File(d, "$name.part")
+            val f = File(d, name)
+            try {
+                src.inputStream().use { input -> FileOutputStream(tmp).use { output -> input.copyTo(output, 1 shl 20); output.flush() } }
+                GifEncoder.verifyGifFile(tmp)
+                if (f.exists()) f.delete()
+                if (!tmp.renameTo(f)) {
+                    tmp.copyTo(f, overwrite = true)
+                    tmp.delete()
+                }
+            } catch (e: Exception) {
+                tmp.delete(); f.delete(); throw e
+            }
             MediaScannerConnection.scanFile(context, arrayOf(f.absolutePath), arrayOf("image/gif"), null)
         }
         return "Pictures/GifFaceSwap/$name"

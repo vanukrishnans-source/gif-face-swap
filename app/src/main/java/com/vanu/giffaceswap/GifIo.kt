@@ -109,7 +109,7 @@ object GifDecoder {
         var i = 13 // skip header + LSD
         if (data.size < 13) return intArrayOf()
         val packed = data[10].toInt() and 0xff
-        if (packed and 0x80 != 0) {
+        if ((packed and 0x80) != 0) {
             val gctSize = 3 * (1 shl ((packed and 0x07) + 1))
             i += gctSize
         }
@@ -122,17 +122,23 @@ object GifDecoder {
                     val label = data[i + 1].toInt() and 0xff
                     i += 2
                     if (label == 0xF9 && i + 5 < data.size) {
-                        // Graphic Control Extension: block size, packed, delay (LE, 1/100s), trans, terminator
+                        // Graphic Control Extension: size, packed, delay (LE centiseconds), trans, then a 0 terminator.
+                        // Must skip size+data then the terminator — treating leftover bytes as sub-blocks
+                        // desyncs when packed != 0 (e.g. disposal method bits).
                         val blockSize = data[i].toInt() and 0xff
-                        if (blockSize >= 4) {
+                        if (blockSize >= 4 && i + 1 + blockSize <= data.size) {
                             val centi = (data[i + 2].toInt() and 0xff) or ((data[i + 3].toInt() and 0xff) shl 8)
                             pendingDelay = (centi * 10).coerceAtLeast(GifPlan.MIN_DELAY_MS)
                         }
-                        i++ // block size byte
-                        while (i < data.size) {
-                            val sz = data[i].toInt() and 0xff; i++
-                            if (sz == 0) break
-                            i += sz
+                        i += 1 + blockSize.coerceAtLeast(0)
+                        if (i < data.size && (data[i].toInt() and 0xff) == 0) {
+                            i++
+                        } else {
+                            while (i < data.size) {
+                                val sz = data[i].toInt() and 0xff; i++
+                                if (sz == 0) break
+                                i += sz
+                            }
                         }
                     } else {
                         while (i < data.size) {
@@ -148,7 +154,7 @@ object GifDecoder {
                     pendingDelay = GifPlan.DEFAULT_DELAY_MS
                     val localPacked = data[i + 9].toInt() and 0xff
                     i += 10
-                    if (localPacked and 0x80 != 0) {
+                    if ((localPacked and 0x80) != 0) {
                         val lct = 3 * (1 shl ((localPacked and 0x07) + 1))
                         i += lct
                     }
@@ -175,23 +181,59 @@ object GifEncoder {
     fun encode(frames: List<Pair<Bitmap, Int>>, outFile: File, loop: Boolean = true) {
         if (frames.isEmpty()) throw GifException("No frames to encode.")
         val tmp = File(outFile.parentFile, outFile.name + ".part")
-        FileOutputStream(tmp).use { os ->
-            write(frames, os, loop)
-        }
-        if (!tmp.renameTo(outFile)) {
-            tmp.copyTo(outFile, overwrite = true)
+        try {
+            FileOutputStream(tmp).use { os ->
+                write(frames, os, loop)
+            }
+            verifyGifFile(tmp)
+            if (!tmp.renameTo(outFile)) {
+                tmp.copyTo(outFile, overwrite = true)
+                tmp.delete()
+            }
+            verifyGifFile(outFile)
+        } catch (e: Exception) {
             tmp.delete()
+            outFile.delete()
+            if (e is GifException) throw e
+            throw GifException("GIF encode failed: ${e.message ?: e.javaClass.simpleName}", e)
         }
+    }
+
+    /** Reject empty / truncated / non-GIF89a output before anything touches MediaStore. */
+    fun verifyGifFile(file: File) {
+        if (!file.isFile) throw GifException("Encoded GIF missing.")
+        val n = file.length()
+        if (n < 32) throw GifException("Encoded GIF too small (${n} bytes) — write failed.")
+        val hdr = ByteArray(6)
+        file.inputStream().use { val r = it.read(hdr); if (r < 6) throw GifException("Encoded GIF truncated.") }
+        val mag = String(hdr, Charsets.US_ASCII)
+        if (mag != "GIF89a" && mag != "GIF87a")
+            throw GifException("Encoded file is not a GIF (got ${hdr.joinToString(" ") { "%02x".format(it) }}).")
     }
 
     fun write(frames: List<Pair<Bitmap, Int>>, os: OutputStream, loop: Boolean) {
         val w = frames[0].first.width
         val h = frames[0].first.height
-        // header
+        // Quantize first frame up front so we can publish a Global Color Table — several Android
+        // gallery thumbnailers refuse (or show a broken icon for) LCT-only GIFs.
+        val prepared = ArrayList<Triple<ByteArray, IntArray, Int>>(frames.size)
+        for ((bmp, delayMs) in frames) {
+            require(bmp.width == w && bmp.height == h) { "frame size mismatch" }
+            val pixels = IntArray(w * h)
+            bmp.getPixels(pixels, 0, w, 0, 0, w, h)
+            val (indexed, palette) = quantize(pixels, 256)
+            prepared.add(Triple(indexed, palette, delayMs))
+        }
+        val gct = prepared[0].second
+        val gctBits = paletteSizeBits(gct.size)
+        val gctCount = 1 shl (gctBits + 1)
+
+        // header + Logical Screen Descriptor with GCT
         os.write("GIF89a".toByteArray(Charsets.US_ASCII))
         writeShort(os, w); writeShort(os, h)
-        os.write(0x70) // GCT flag off for now; we'll write local tables per frame for better quality
+        os.write(0x80 or 0x70 or gctBits) // GCT flag | color resolution 7 | gct size
         os.write(0); os.write(0) // bg index, aspect
+        writeColorTable(os, gct, gctCount)
 
         if (loop) {
             // Netscape application extension
@@ -200,28 +242,25 @@ object GifEncoder {
             os.write(3); os.write(1); writeShort(os, 0); os.write(0)
         }
 
-        for ((bmp, delayMs) in frames) {
-            require(bmp.width == w && bmp.height == h) { "frame size mismatch" }
-            val pixels = IntArray(w * h)
-            bmp.getPixels(pixels, 0, w, 0, 0, w, h)
-            val (indexed, palette) = quantize(pixels, 256)
-            // Graphic Control Extension
+        for ((fi, triple) in prepared.withIndex()) {
+            val (indexed, palette, delayMs) = triple
+            // Graphic Control Extension — disposal 1 (do not dispose) for full-frame replacement
             os.write(0x21); os.write(0xF9); os.write(4)
-            os.write(0x00) // no transparency, disposal 0
+            os.write(0x04) // disposal 1 (do not dispose), no transparency
             writeShort(os, (delayMs / 10).coerceAtLeast(2))
             os.write(0); os.write(0)
-            // Image Descriptor + local color table
+            // Image Descriptor
             os.write(0x2C)
             writeShort(os, 0); writeShort(os, 0); writeShort(os, w); writeShort(os, h)
-            val palSize = paletteSizeBits(palette.size)
-            os.write(0x80 or palSize) // local color table
-            for (i in 0 until (1 shl (palSize + 1))) {
-                if (i < palette.size) {
-                    val c = palette[i]
-                    os.write((c shr 16) and 0xff); os.write((c shr 8) and 0xff); os.write(c and 0xff)
-                } else {
-                    os.write(0); os.write(0); os.write(0)
-                }
+            val palSize: Int
+            if (fi == 0) {
+                // Frame 0 uses the Global Color Table already written above.
+                palSize = gctBits
+                os.write(0x00)
+            } else {
+                palSize = paletteSizeBits(palette.size)
+                os.write(0x80 or palSize)
+                writeColorTable(os, palette, 1 shl (palSize + 1))
             }
             val minCode = (palSize + 1).coerceAtLeast(2)
             os.write(minCode)
@@ -229,6 +268,17 @@ object GifEncoder {
         }
         os.write(0x3B) // trailer
         os.flush()
+    }
+
+    private fun writeColorTable(os: OutputStream, palette: IntArray, count: Int) {
+        for (i in 0 until count) {
+            if (i < palette.size) {
+                val c = palette[i]
+                os.write((c shr 16) and 0xff); os.write((c shr 8) and 0xff); os.write(c and 0xff)
+            } else {
+                os.write(0); os.write(0); os.write(0)
+            }
+        }
     }
 
     private fun paletteSizeBits(n: Int): Int {
@@ -359,11 +409,14 @@ object GifEncoder {
             }
             os.write(0)
         }
+        // GIF89a: Clear must be written at the *current* code width, then width resets.
+        // Emitting Clear after resetting width (the previous bug) corrupts any frame whose
+        // LZW dictionary fills — Gallery/Photos then show a broken-image thumbnail.
         fun resetTable() {
+            emit(clear, width)
             table.clear()
             nextCode = eof + 1
             width = initWidth
-            emit(clear, width)
         }
 
         resetTable()
