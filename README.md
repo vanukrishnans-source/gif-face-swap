@@ -11,8 +11,8 @@ Offline Android app that swaps a face from a photo onto every frame of an animat
 
 | APK | Size | SHA-256 |
 |---|---|---|
-| [GifFaceSwap-1.0-arm64.apk](../../releases/download/v1.0/GifFaceSwap-1.0-arm64.apk) (use this) | ~16.3 MB | `aa47ee61fb4755a96b7ac890eec0400518f0e60022217e9c34a9bb65d0029ad0` |
-| [GifFaceSwap-1.0-armeabi-v7a.apk](../../releases/download/v1.0/GifFaceSwap-1.0-armeabi-v7a.apk) | ~14.9 MB | `93c6c6af0815852ac1aee7474d33961430d94f3d39d0b9ac607d34dc1f0a1466` |
+| [GifFaceSwap-1.0-arm64.apk](https://github.com/vanukrishnans-source/gif-face-swap/releases/download/v1.0/GifFaceSwap-1.0-arm64.apk) (use this) | 17,135,991 B (~16.3 MB) | `aa47ee61fb4755a96b7ac890eec0400518f0e60022217e9c34a9bb65d0029ad0` |
+| [GifFaceSwap-1.0-armeabi-v7a.apk](https://github.com/vanukrishnans-source/gif-face-swap/releases/download/v1.0/GifFaceSwap-1.0-armeabi-v7a.apk) | 15,589,999 B (~14.9 MB) | `93c6c6af0815852ac1aee7474d33961430d94f3d39d0b9ac607d34dc1f0a1466` |
 
 arm64 covers current phones (Galaxy S24 Ultra, ROG Phone 3, etc.).
 
